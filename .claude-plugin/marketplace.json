@@ -1,0 +1,13 @@
+{
+  "name": "inline-images",
+  "description": "Draw images inline in the Claude Code terminal transcript",
+  "owner": {
+    "name": "Alex Stevenson-Price"
+  },
+  "plugins": [
+    {
+      "name": "inline-images",
+      "source": "./"
+    }
+  ]
+}
