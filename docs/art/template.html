@@ -90,9 +90,9 @@
 </head>
 <body>
   <div class="copy">
-    <div class="eyebrow"><span class="dot"></span>a Claude Code mod</div>
-    <h1>inline-images</h1>
-    <p class="tagline">See the images Claude reads, sends and you paste, <b>right in your terminal</b>.</p>
+    <div class="eyebrow"><span class="dot"></span><span class="name">a Claude Code mod</span></div>
+    <h1 class="title">inline-images</h1>
+    <p class="tagline" id="tagline">See the images Claude reads, sends and you paste, <b>right in your terminal</b>.</p>
     <div class="chips">
       <span class="chip">kitty graphics</span>
       <span class="chip">Ghostty</span>
@@ -115,7 +115,13 @@
   </div>
 <script>
   // template.html#header draws the README header; no hash, the social preview.
-  if (location.hash === "#header") document.body.classList.add("header")
+  // Under the README's own title the header leads with what it does instead.
+  if (location.hash === "#header") {
+    document.body.classList.add("header")
+    document.querySelector(".name").textContent = "inline-images · a Claude Code mod"
+    document.querySelector(".title").textContent = "See what Claude sees."
+    document.querySelector("#tagline").innerHTML = "Images Claude reads, sends and you paste, drawn <b>right in your terminal</b>."
+  }
 </script>
 </body>
 </html>
