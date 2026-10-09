@@ -2,7 +2,7 @@
 
 A [Claude Code](https://claude.com/claude-code) mod that draws images right in the terminal transcript, the way the desktop and mobile apps show them, using the kitty graphics protocol.
 
-![A pasted photo of a dog drawn inline in a Claude Code terminal session, with its caption and Claude's reply below](docs/screenshot.png)
+![inline-images: see the images Claude reads, sends and you paste, right in your terminal. A Claude Code session shows a pasted photo of a dog drawn inline, with its caption and Claude's reply.](docs/header.png)
 
 It draws:
 
