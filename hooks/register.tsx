@@ -9,8 +9,8 @@ const DEFAULT_CELL_ASPECT = 2
 const MAX_PNG_BYTES = 2 * 1024 * 1024
 
 const PASTE_TOKEN = /\[Image #(\d+)\]/g
-// ![alt](/abs/or/~/path.png) in a reply.
-const MD_IMAGE = /!\[([^\]]*)\]\(((?:~|\/)[^)\s]+?\.(?:png|jpe?g|gif|webp))\)/gi
+// ![alt](/abs/or/~/path.png) in a reply, or C:\path.png on Windows.
+const MD_IMAGE = /!\[([^\]]*)\]\(((?:~|\/|[A-Za-z]:[\\/])[^)\s]+?\.(?:png|jpe?g|gif|webp))\)/gi
 // Fenced code blocks (a still-open one runs to the end) and inline code spans.
 const CODE = /```[\s\S]*?(?:```|$)|`[^`\n]*`/g
 
@@ -54,14 +54,27 @@ exec perl -e 'open(my $t, "<", $ARGV[0]) or exit 1; my $b = "\\0" x 8;
   ioctl($t, hex($ARGV[1]), $b) or exit 1; print join(" ", unpack("S4", $b))' "/dev/$t" "$req"
 `
 
+let windows: Promise<boolean> | null = null
+
+// Windows has no sips, and its convert.exe converts disks, so pictures there
+// are made with Python and Pillow (pyToPng) and opened with os.startfile.
+const isWindows = ($: any): Promise<boolean> =>
+  (windows ??= $.session
+    .machine()
+    .then((m: any) => m.sysname === 'Windows_NT')
+    .catch(() => false))
+
 let measuring: Promise<void> | null = null
 
 // Measured once a load and again at each turn (a font size may change), with
-// a redraw when the shape moved.
+// a redraw when the shape moved. Not on Windows: no tty to ask, the guess stands.
 const measureCell = ($: any): Promise<void> =>
-  (measuring ??= $.process
-    .run(['sh', '-c', MEASURE_CELL])
+  (measuring ??= isWindows($)
+    .then(isWin => (isWin ? null : $.process.run(['sh', '-c', MEASURE_CELL])))
     .then((r: any) => {
+      if (!r) {
+        return
+      }
       const [rows, columns, xpix, ypix] = String(r.stdout).trim().split(' ').map(Number)
       const aspect = rows && columns && xpix && ypix ? ypix / rows / (xpix / columns) : NaN
 
@@ -139,7 +152,51 @@ fi || exit 1
 head -c 24 "$out" | base64 | tr -d '\\n'
 `
 
+// Prints the base64 of a PNG made from the image at argv[1], or from base64 on
+// stdin when it is empty, first frame only, halved until it fits in 2 MiB.
+const PY_TO_PNG = `
+import base64, io, sys
+from PIL import Image
+src = sys.argv[1] or io.BytesIO(base64.b64decode(sys.stdin.read()))
+im = Image.open(src)
+im.seek(0)
+im = im.convert('RGBA')
+while True:
+    out = io.BytesIO()
+    im.save(out, 'PNG')
+    if out.tell() <= 2 * 1024 * 1024 or min(im.size) < 64:
+        break
+    im = im.resize((im.width // 2, im.height // 2))
+sys.stdout.write(base64.b64encode(out.getvalue()).decode())
+`
+
+// Windows: a PNG file small enough is drawn from its own bytes, anything else
+// is converted by Python. Bytes, not a cached file, since the terminal cannot
+// open the Git Bash paths a POSIX shell would give the cache.
+const pyToPng = async ($: any, args: { stdin?: string; path?: string }): Promise<Picture | null> => {
+  if (args.path && /\.png$/i.test(args.path)) {
+    const { base64 } = await $.fs.read(args.path, { as: 'bytes' })
+    const size = pngSize(base64)
+    if (size?.width && size.height && base64.length * 0.75 <= MAX_PNG_BYTES) {
+      return { source: { png: base64 }, ...size }
+    }
+  }
+
+  const r = await $.process.run(['python', '-I', '-c', PY_TO_PNG, args.path ?? ''], {
+    stdin: args.stdin,
+    timeoutMs: 60_000,
+  })
+  const data = r.exitCode === 0 && !r.isStdoutTruncated ? String(r.stdout).trim() : ''
+  const size = data ? pngSize(data) : null
+
+  return size?.width && size.height ? { source: { png: data }, ...size } : null
+}
+
 const toPng = async ($: any, key: string, args: { stdin?: string; path?: string }) => {
+  if (await isWindows($)) {
+    return pyToPng($, args)
+  }
+
   const dir = await cacheDirFor($)
   if (!dir) {
     return null
@@ -187,10 +244,28 @@ else
 fi
 `
 
+// Windows: opens argv[1] in the default app, or first writes base64 on stdin
+// to argv[2] in the temp folder when argv[1] is empty.
+const PY_OPEN = `
+import base64, os, sys, tempfile
+path = sys.argv[1]
+if not path:
+    path = os.path.join(tempfile.gettempdir(), sys.argv[2])
+    with open(path, 'wb') as f:
+        f.write(base64.b64decode(sys.stdin.read()))
+os.startfile(os.path.normpath(path))
+`
+
 // Open in the default app: the file it came from, else the converted copy,
 // else the PNG bytes written out to the cache first.
 const openPicture = async ($: any, key: string, p: Picture) => {
   const file = p.origin ?? ('file' in p.source ? p.source.file : undefined)
+
+  if (await isWindows($)) {
+    const stdin = !file && 'png' in p.source ? p.source.png : undefined
+    await $.process.run(['python', '-I', '-c', PY_OPEN, file ?? '', `${safeKey(`open-${key}`)}.png`], { stdin })
+    return
+  }
 
   if (file) {
     await $.process.run(['sh', '-c', OPEN, 'sh', file, ''])
@@ -398,7 +473,7 @@ const expandHome = async ($: any, path: string) => {
   if (!path.startsWith('~')) {
     return path
   }
-  home ??= $.process.run(['printenv', 'HOME']).then((r: any) => r.stdout.trim())
+  home ??= (async () => (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE')) ?? '')()
   return (await home) + path.slice(1)
 }
 
