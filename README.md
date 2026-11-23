@@ -9,7 +9,7 @@ It draws:
 - **Images Claude reads**: a `Read` of a PNG, JPEG, GIF or WebP shows the picture under the call.
 - **Images Claude sends**: `SendUserFile` attachments, and image blocks returned by MCP tools (screenshots and the like).
 - **Images you paste**: each `[Image #N]` in your prompt is drawn under it.
-- **Markdown images in replies**: `![alt](/absolute/path.png)` or `~/path.png` in Claude's answer becomes the picture. Images inside code blocks are left as code.
+- **Markdown images in replies**: `![alt](/absolute/path.png)`, `~/path.png` or `C:/path.png` in Claude's answer becomes the picture. Images inside code blocks are left as code.
 
 Each picture has a small caption above it:
 
@@ -26,6 +26,7 @@ Each picture has a small caption above it:
 - **A terminal that draws kitty graphics**, such as [Ghostty](https://ghostty.org) or [kitty](https://sw.kovidgoyal.net/kitty/). Elsewhere Claude Code draws a dim `[image W×H]` placeholder instead.
 - **macOS** uses the built-in `sips`, `base64`, `open` and `perl`.
 - **Linux is untested for now.** The mod needs ImageMagick (`magick` or `convert`) to convert images, `xdg-open` to open them, and `perl` to read the terminal's cell size. If you try it, please open an issue saying how it went.
+- **Windows** needs Python 3 with [Pillow](https://python-pillow.org) (`pip install pillow`) as `python` on the PATH, to convert images and open them. Tested in the [Herdr](https://herdr.dev) desktop app; see the multiplexer section below.
 
 ## Install
 
@@ -47,13 +48,19 @@ export CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1
 
 The multiplexer also has to pass kitty graphics through to the outer terminal. In tmux that means `set -g allow-passthrough on`.
 
+On Windows, set it in your PowerShell profile (`$PROFILE`). To set it only inside Herdr, which marks its terminals with `HC_TERMINAL_ID`:
+
+```powershell
+if ($env:HC_TERMINAL_ID) { $env:CLAUDE_CODE_FORCE_TERMINAL_IMAGES = '1' }
+```
+
 ## How it works
 
 The mod hooks Claude Code's `ui.render` events for tool calls, tool results, your prompts and Claude's replies. Where one carries an image, it draws Claude Code's `Image` element in place of the usual row.
 
-- **Conversion:** images that aren't PNG, or are too large to send inline, are converted to PNG with `sips` (macOS) or ImageMagick (Linux).
-- **Cache:** converted files go in a private cache folder, `$TMPDIR/claude-inline-images-<uid>` (mode 0700). Your OS clears it along with the rest of the temp folder.
-- **Sizing:** each picture is sized from its pixel dimensions and the terminal's real cell size, up to 80 columns by 30 rows.
+- **Conversion:** images that aren't PNG, or are too large to send inline, are converted to PNG with `sips` (macOS), ImageMagick (Linux) or Python and Pillow (Windows).
+- **Cache:** converted files go in a private cache folder, `$TMPDIR/claude-inline-images-<uid>` (mode 0700). Your OS clears it along with the rest of the temp folder. On Windows there is no cache: pictures are sent to the terminal as PNG bytes, scaled down until they fit in 2 MiB.
+- **Sizing:** each picture is sized from its pixel dimensions and the terminal's real cell size, up to 80 columns by 30 rows. On Windows the cell size is not measured and an assumed 1:2 cell is used.
 
 ## Limitations
 
